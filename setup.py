@@ -4,10 +4,15 @@
 
 from setuptools import setup, find_packages
 
-PACKAGE_VERSION = '0.1'
+PACKAGE_VERSION = '0.2'
 
 deps = [
-    'marionette-client == 0.8.7',
+    'marionette-client == 0.19',
+    'marionette-driver == 0.13',
+    'mozfile == 1.2',
+    'mozinfo == 0.8',
+    'mozinstall == 1.12',
+    'mozlog == 3.0',
 ]
 
 setup(name='firefox-ui-tests',
@@ -33,5 +38,6 @@ setup(name='firefox-ui-tests',
       install_requires=deps,
       entry_points="""
         [console_scripts]
-        firefox-ui-tests = firefox_ui_harness:run
+        firefox-ui-tests = firefox_ui_harness:cli
+        firefox-ui-update = firefox_ui_harness:cli_update
       """)

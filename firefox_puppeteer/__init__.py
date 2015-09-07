@@ -4,7 +4,7 @@
 
 import os
 
-from marionette import HTMLElement
+from marionette_driver.marionette import HTMLElement
 
 from .decorators import use_class_as_property
 
@@ -47,6 +47,20 @@ class Puppeteer(object):
         See the :class:`~api.keys.Keys` reference.
         """
 
+    @use_class_as_property('api.places.Places')
+    def places(self):
+        """Provides low-level access to several bookmark and history related actions.
+
+        See the :class:`~api.places.Places` reference.
+        """
+
+    @use_class_as_property('api.utils.Utils')
+    def utils(self):
+        """Provides an api for interacting with utility actions.
+
+        See the :class:`~api.utils.Utils` reference.
+        """
+
     @property
     def platform(self):
         """Returns the lowercased platform name.
@@ -62,6 +76,14 @@ class Puppeteer(object):
         about:config.
 
         See the :class:`~api.prefs.Preferences` reference.
+        """
+
+    @use_class_as_property('api.security.Security')
+    def security(self):
+        """
+        Provides an api for accessing security related properties and helpers.
+
+        See the :class:`~api.security.Security` reference.
         """
 
     @use_class_as_property('ui.windows.Windows')

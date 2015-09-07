@@ -1,38 +1,58 @@
-language: python
+sudo: false
 
-python:
-    - 2.7
+language: c
 
-env: DISPLAY=:99 MOZ_XVFB=1
+branches:
+  exclude:
+    # Do not run tests for ESR releases, because there are no latest builds available
+    - /^mozilla-esr.*$/
+
+os:
+    - osx
+    - linux
+
+compiler:
+    # we don't require a C compiler! if we don't specify one here, we get extra builds,
+    # for both gcc and clang
+    - gcc
+
+env:
+    # Test with our internal pypi mirror
+    - PIP_FIND_LINKS=http://pypi.pub.build.mozilla.org/pub
+      PIP_NO_INDEX=1
+      DISPLAY=$(if [[ $TRAVIS_OS_NAME = 'linux' ]]; then echo ':99'; fi)
+      MOZ_XVFB=$(if [[ $TRAVIS_OS_NAME = 'linux' ]]; then echo 1; fi)
+    # ... and with the official pypi website
+    - DISPLAY=$(if [[ $TRAVIS_OS_NAME = 'linux' ]]; then echo ':99'; fi)
+      MOZ_XVFB=$(if [[ $TRAVIS_OS_NAME = 'linux' ]]; then echo 1; fi)
 
 before_install:
-    - sudo apt-get update
-    - "/sbin/start-stop-daemon --start --quiet --make-pidfile --pidfile /tmp/custom_xvfb_99.pid --background --exec /usr/bin/Xvfb -- :99 -ac -screen 0 1024x768x24"
+    - if [ "$TRAVIS_OS_NAME" == "linux" ]; then /sbin/start-stop-daemon --start --quiet --make-pidfile --pidfile /tmp/custom_xvfb_99.pid --background --exec /usr/bin/Xvfb -- :99 -ac -screen 0 1280x768x24 ; fi
 
 install:
-    - sudo apt-get install flashplugin-nonfree subversion
+    # We need to either pin our marionette version or get every dependent package from
+    # tree to avoid bustage. Pinning marionette means we're more likely to work out of the
+    # the box for those working locally without a clone of m-c.
+    # - svn checkout https://github.com/mozilla/gecko-dev/trunk/testing/marionette/client
+    # - "cd client && python setup.py develop && cd .."
 
-    # As long as we have invasive changes lets get the trunk version of marionette-client
-    - svn checkout https://github.com/mozilla/gecko-dev/trunk/testing/marionette/client
-    - "cd client && python setup.py develop && cd .."
-
-    - python setup.py develop
-    - pip install mozdownload pep8
+    - python create_venv.py --with-optional-packages ~/.venv
+    - source ~/.venv/bin/activate
 
 before_script:
     # Run pep8 on all except the checked out marionette-client folder
-    - pep8 --max-line-length=99 --exclude=client .
+    - pep8 --config ./.pep8.rc --exclude=client .
 
-    # Download Firefox Nightly which is compatible with the used version of
-    # marionette client
-    - mozdownload -t daily
-    - tar -xvf *firefox*.tar.bz2
+    # Prepare the build and everything else
+    - ./.travis/before_script.sh
 
 script:
-    - firefox-ui-tests --binary firefox/firefox
+    # Run in non-e10s mode
+    - firefox-ui-tests --installer *firefox-* --gecko-log -
+
+    # Run in e10s mode
+    - firefox-ui-tests --installer *firefox-* --gecko-log - --e10s
 
 notifications:
-#      email:
-#          - dev-automation@lists.mozilla.org
     irc:
         - "irc.mozilla.org#automation"

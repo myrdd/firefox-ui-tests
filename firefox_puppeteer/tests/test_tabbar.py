@@ -2,10 +2,18 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from firefox_ui_harness.testcase import FirefoxTestCase
+from firefox_ui_harness import FirefoxTestCase
+
+from firefox_puppeteer.errors import NoCertificateError
 
 
 class TestTabBar(FirefoxTestCase):
+
+    def tearDown(self):
+        try:
+            self.browser.tabbar.close_all_tabs([self.browser.tabbar.tabs[0]])
+        finally:
+            FirefoxTestCase.tearDown(self)
 
     def test_pref(self):
         print self.prefs.get_pref('app.update.enabled')
@@ -14,7 +22,7 @@ class TestTabBar(FirefoxTestCase):
         self.marionette.restart()
         print self.prefs.get_pref('app.update.enabled')
 
-    def tst_basics(self):
+    def test_basics(self):
         tabbar = self.browser.tabbar
 
         self.assertEqual(tabbar.window, self.browser)
@@ -25,7 +33,7 @@ class TestTabBar(FirefoxTestCase):
         self.assertEqual(tabbar.newtab_button.get_attribute('localName'), 'toolbarbutton')
         self.assertEqual(tabbar.toolbar.get_attribute('localName'), 'tabs')
 
-    def tst_open_close(self):
+    def test_open_close(self):
         tabbar = self.browser.tabbar
 
         self.assertEqual(len(tabbar.tabs), 1)
@@ -68,14 +76,18 @@ class TestTabBar(FirefoxTestCase):
             self.assertEqual(tabbar.tabs[0].handle, self.marionette.current_window_handle)
             self.assertNotEqual(new_tab.handle, tabbar.tabs[0].handle)
 
-        # Close a tab which is not selected
+    def test_close_not_selected_tab(self):
+        tabbar = self.browser.tabbar
+
         new_tab = tabbar.open_tab()
         tabbar.close_tab(tabbar.tabs[0])
 
         self.assertEqual(len(tabbar.tabs), 1)
         self.assertEqual(new_tab, tabbar.tabs[0])
 
-        # Close all tabs except the first one
+    def test_close_all_tabs_except_first(self):
+        tabbar = self.browser.tabbar
+
         orig_tab = tabbar.tabs[0]
 
         for i in range(0, 3):
@@ -85,7 +97,7 @@ class TestTabBar(FirefoxTestCase):
         self.assertEqual(len(tabbar.tabs), 1)
         self.assertEqual(orig_tab.handle, self.marionette.current_window_handle)
 
-    def tst_switch_to(self):
+    def test_switch_to(self):
         tabbar = self.browser.tabbar
 
         # Open a new tab in the foreground (will be auto-selected)
@@ -111,7 +123,13 @@ class TestTabBar(FirefoxTestCase):
 
 class TestTab(FirefoxTestCase):
 
-    def tst_basic(self):
+    def tearDown(self):
+        try:
+            self.browser.tabbar.close_all_tabs([self.browser.tabbar.tabs[0]])
+        finally:
+            FirefoxTestCase.tearDown(self)
+
+    def test_basic(self):
         tab = self.browser.tabbar.tabs[0]
 
         self.assertEqual(tab.window, self.browser)
@@ -119,7 +137,15 @@ class TestTab(FirefoxTestCase):
         self.assertEqual(tab.get_attribute('localName'), 'tab')
         self.assertEqual(tab.close_button.get_attribute('localName'), 'toolbarbutton')
 
-    def tst_close(self):
+    def test_certificate(self):
+        url = self.marionette.absolute_url('layout/mozilla.html')
+
+        with self.marionette.using_context(self.marionette.CONTEXT_CONTENT):
+            self.marionette.navigate(url)
+        with self.assertRaises(NoCertificateError):
+            self.browser.tabbar.tabs[0].certificate
+
+    def test_close(self):
         tabbar = self.browser.tabbar
 
         self.assertEqual(len(tabbar.tabs), 1)
@@ -145,7 +171,13 @@ class TestTab(FirefoxTestCase):
             self.assertEqual(tabbar.tabs[0].handle, self.marionette.current_window_handle)
             self.assertNotEqual(new_tab.handle, tabbar.tabs[0].handle)
 
-    def tst_switch_to(self):
+    def test_location(self):
+        url = self.marionette.absolute_url('layout/mozilla.html')
+        with self.marionette.using_context(self.marionette.CONTEXT_CONTENT):
+            self.marionette.navigate(url)
+        self.assertEqual(self.browser.tabbar.tabs[0].location, url)
+
+    def test_switch_to(self):
         tabbar = self.browser.tabbar
 
         new_tab = tabbar.open_tab()

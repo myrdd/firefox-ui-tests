@@ -2,15 +2,16 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from marionette import (
-    Wait,
+from marionette_driver import (
+    By, Wait
 )
 
-from marionette.errors import NoSuchElementException
+from marionette_driver.errors import NoSuchElementException
 
 import firefox_puppeteer.errors as errors
 
 from .. import DOMElement
+from ..api.security import Security
 from ..base import UIBaseLib
 
 
@@ -21,10 +22,10 @@ class TabBar(UIBaseLib):
 
     @property
     def menupanel(self):
-        """A :class:`~ui.menu.MenuPanel` instance which represents the menu panel
+        """A :class:`MenuPanel` instance which represents the menu panel
         at the far right side of the tabs toolbar.
 
-        :returns: :class:`~ui.menu.MenuPanel` instance
+        :returns: :class:`MenuPanel` instance.
         """
         with self.marionette.using_context('chrome'):
             return MenuPanel(lambda: self.marionette, self.window)
@@ -33,29 +34,29 @@ class TabBar(UIBaseLib):
     def newtab_button(self):
         """The DOM element which represents the new tab button.
 
-        :returns: Reference to the new tab button
+        :returns: Reference to the new tab button.
         """
         with self.marionette.using_context('chrome'):
-            return self.toolbar.find_element('anon attribute', {'anonid': 'tabs-newtab-button'})
+            return self.toolbar.find_element(By.ANON_ATTRIBUTE, {'anonid': 'tabs-newtab-button'})
 
     @property
     def tabs(self):
         """List of all the :class:`Tab` instances of the current browser window.
 
-        :returns: List of :class:`Tab`'s
+        :returns: List of :class:`Tab` instances.
         """
         with self.marionette.using_context('chrome'):
-            tabs = self.toolbar.find_elements('tag name', 'tab')
+            tabs = self.toolbar.find_elements(By.TAG_NAME, 'tab')
             return [Tab(lambda: self.marionette, self.window, tab) for tab in tabs]
 
     @property
     def toolbar(self):
         """The DOM element which represents the tab toolbar.
 
-        :returns: Reference to the tabs toolbar
+        :returns: Reference to the tabs toolbar.
         """
         with self.marionette.using_context('chrome'):
-            return self.inner
+            return self.element
 
     # Properties for helpers when working with the tabs toolbar #
 
@@ -63,7 +64,7 @@ class TabBar(UIBaseLib):
     def selected_index(self):
         """The index of the currently selected tab.
 
-        :return: Index of the selected tab
+        :return: Index of the selected tab.
         """
         with self.marionette.using_context('chrome'):
             return int(self.toolbar.get_attribute('selectedIndex'))
@@ -72,7 +73,7 @@ class TabBar(UIBaseLib):
     def selected_tab(self):
         """A :class:`Tab` instance of the currently selected tab.
 
-        :returns: :class:`Tab` instance
+        :returns: :class:`Tab` instance.
         """
         with self.marionette.using_context('chrome'):
             return self.tabs[self.selected_index]
@@ -85,7 +86,7 @@ class TabBar(UIBaseLib):
         There is an optional `exceptions` list, which can be used to exclude
         specific tabs from being closed.
 
-        :param exceptions: Optional, list of :class:`Tab` instances not to close
+        :param exceptions: Optional, list of :class:`Tab` instances not to close.
         """
         # Get handles from tab exceptions, and find those which can be closed
         for tab in self.tabs:
@@ -96,14 +97,14 @@ class TabBar(UIBaseLib):
         """Closes the tab by using the specified trigger.
 
         By default the currently selected tab will be closed. If another :class:`Tab`
-        is specified, that one will be closed instead. Also when the tab is closed a
+        is specified, that one will be closed instead. Also when the tab is closed, a
         :func:`switch_to` call is automatically performed, so that the new selected
         tab becomes active.
 
         :param tab: Optional, the :class:`Tab` instance to close. Defaults to
          the currently selected tab.
 
-        :param trigger: Optional, method in how to close the current tab. This can
+        :param trigger: Optional, method to close the current tab. This can
          be a string with one of `menu` or `shortcut`, or a callback which gets triggered
          with the :class:`Tab` as parameter. Defaults to `menu`.
 
@@ -120,12 +121,12 @@ class TabBar(UIBaseLib):
         automatically be performed. But if it opens in the background, the current
         tab will keep its focus.
 
-        :param trigger: Optional, method in how to open the new tab. This can
+        :param trigger: Optional, method to open the new tab. This can
          be a string with one of `menu`, `button` or `shortcut`, or a callback
          which gets triggered with the current :class:`Tab` as parameter.
          Defaults to `menu`.
 
-        :returns: :class:`Tab` instance for the opened tab
+        :returns: :class:`Tab` instance for the opened tab.
         """
         start_handles = self.marionette.window_handles
 
@@ -137,7 +138,7 @@ class TabBar(UIBaseLib):
                 self.window.tabbar.newtab_button.click()
             elif trigger == 'menu':
                 # TODO: Make use of menubar class once it supports ids
-                menu = self.window.marionette.find_element('id', 'menu_newNavigatorTab')
+                menu = self.window.marionette.find_element(By.ID, 'menu_newNavigatorTab')
                 menu.click()
             elif trigger == 'shortcut':
                 self.window.send_shortcut(self.window.get_entity('tabCmd.commandkey'), accel=True)
@@ -165,7 +166,7 @@ class TabBar(UIBaseLib):
         :param target: The tab to switch to. `target` can be an index, a :class:`Tab`
          instance, or a callback that returns True in the context of the desired tab.
 
-        :returns: Instance of the selected :class:`Tab`
+        :returns: Instance of the selected :class:`Tab`.
         """
         start_handle = self.marionette.current_window_handle
 
@@ -192,7 +193,7 @@ class TabBar(UIBaseLib):
 
         :param tab_element: The DOM element corresponding to a tab inside the tabs toolbar.
 
-        :returns: `handle` of the tab
+        :returns: `handle` of the tab.
         """
         # TODO: This introduces coupling with marionette's window handles
         # implementation. To avoid this, the capacity to get the XUL
@@ -200,6 +201,9 @@ class TabBar(UIBaseLib):
         # marionette or a similar ability should be added to marionette.
         handle = marionette.execute_script("""
           let win = arguments[0].linkedBrowser.contentWindowAsCPOW;
+          if (!win) {
+            return null;
+          }
           return win.QueryInterface(Ci.nsIInterfaceRequestor)
                     .getInterface(Ci.nsIDOMWindowUtils)
                     .outerWindowID.toString();
@@ -211,17 +215,11 @@ class TabBar(UIBaseLib):
 class Tab(UIBaseLib):
     """Wraps a tab DOM element."""
 
-    def __init__(self, marionette_getter, window, dom_element):
-        UIBaseLib.__init__(self, marionette_getter, window, dom_element)
+    def __init__(self, marionette_getter, window, element):
+        UIBaseLib.__init__(self, marionette_getter, window, element)
 
-        self._handle = TabBar.get_handle_for_tab(self.marionette, dom_element)
-
-        # Ensure the tab has been fully loaded
-        Wait(self.marionette).until(
-            lambda mn: mn.execute_script("""
-              return !arguments[0].hasAttribute('busy');
-            """, script_args=[dom_element])
-        )
+        self._security = Security(lambda: self.marionette)
+        self._handle = None
 
     # Properties for visual elements of tabs #
 
@@ -229,10 +227,34 @@ class Tab(UIBaseLib):
     def close_button(self):
         """The DOM element which represents the tab close button.
 
-        :returns: Reference to the tab close button
+        :returns: Reference to the tab close button.
         """
         with self.marionette.using_context('chrome'):
-            return self.inner.find_element('anon attribute', {'anonid': 'close-button'})
+            return self.element.find_element(By.ANON_ATTRIBUTE, {'anonid': 'close-button'})
+
+    # Properties for backend values
+
+    @property
+    def location(self):
+        """Returns the current URL
+
+        :returns: Current URL
+        """
+        self.switch_to()
+
+        return self.marionette.execute_script("""
+          return arguments[0].linkedBrowser.currentURI.spec;
+        """, script_args=[self.element])
+
+    @property
+    def certificate(self):
+        """The SSL certificate assiciated with the loaded web page.
+
+        :returns: Certificate details as JSON blob.
+        """
+        self.switch_to()
+
+        return self._security.get_certificate_for_page(self.element)
 
     # Properties for helpers when working with tabs #
 
@@ -240,20 +262,27 @@ class Tab(UIBaseLib):
     def handle(self):
         """The `handle` of the content window.
 
-        :returns: content window `handle`
+        :returns: content window `handle`.
         """
+        def get_handle(_):
+            self._handle = TabBar.get_handle_for_tab(self.marionette, self.element)
+            return self._handle is not None
+
+        # With e10s enabled, contentWindowAsCPOW isn't available right away.
+        if self._handle is None:
+            Wait(self.marionette).until(get_handle)
         return self._handle
 
     @property
     def selected(self):
         """Checks if the tab is selected.
 
-        :return: `True` if the tab is selected
+        :return: `True` if the tab is selected.
         """
         with self.marionette.using_context('chrome'):
             return self.marionette.execute_script("""
                 return arguments[0].hasAttribute('selected');
-            """, script_args=[self.inner])
+            """, script_args=[self.element])
 
     # Methods for helpers when working with tabs #
 
@@ -286,7 +315,7 @@ class Tab(UIBaseLib):
                 self.close_button.click()
             elif trigger == 'menu':
                 # TODO: Make use of menubar class once it supports ids
-                menu = self.window.marionette.find_element('id', 'menu_close')
+                menu = self.window.marionette.find_element(By.ID, 'menu_close')
                 menu.click()
             elif trigger == 'shortcut':
                 self.window.send_shortcut(self.window.get_entity('closeCmd.key'), accel=True)
@@ -302,7 +331,7 @@ class Tab(UIBaseLib):
     def select(self):
         """Selects the tab and sets the focus to it."""
         with self.marionette.using_context('chrome'):
-            self.inner.click()
+            self.element.click()
             self.switch_to()
 
             # Bug 1121705: Maybe we have to wait for TabSelect event
@@ -325,13 +354,11 @@ class MenuPanel(UIBaseLib):
         """
         :returns: The :class:`MenuPanelElement`.
         """
-        popup = self.marionette.find_element('id', 'PanelUI-popup')
+        popup = self.marionette.find_element(By.ID, 'PanelUI-popup')
         return self.MenuPanelElement(popup)
 
     class MenuPanelElement(DOMElement):
-        """
-        Wraps the menu panel.
-        """
+        """Wraps the menu panel."""
         _buttons = None
 
         @property
@@ -340,10 +367,10 @@ class MenuPanel(UIBaseLib):
             :returns: A list of all the clickable buttons in the menu panel.
             """
             if not self._buttons:
-                self._buttons = (self.find_element('id', 'PanelUI-multiView')
-                                     .find_element('anon attribute',
+                self._buttons = (self.find_element(By.ID, 'PanelUI-multiView')
+                                     .find_element(By.ANON_ATTRIBUTE,
                                                    {'anonid': 'viewContainer'})
-                                     .find_elements('tag name',
+                                     .find_elements(By.TAG_NAME,
                                                     'toolbarbutton'))
             return self._buttons
 
@@ -352,7 +379,7 @@ class MenuPanel(UIBaseLib):
             Overrides HTMLElement.click to provide a target to click.
 
             :param target: The label associated with the button to click on,
-             e.g 'New Private Window'.
+             e.g., `New Private Window`.
             """
             if not target:
                 return DOMElement.click(self)

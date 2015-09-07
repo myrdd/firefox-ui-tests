@@ -2,14 +2,13 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from firefox_ui_harness.decorators import skip_if_e10s
-from firefox_ui_harness.testcase import FirefoxTestCase
+from marionette_driver import Wait
+
+from firefox_ui_harness import FirefoxTestCase
 
 
 class TestBrowserWindowShortcuts(FirefoxTestCase):
 
-    # Test navigates between remote and non remote pages (bug 1096488)
-    @skip_if_e10s
     def test_addons_manager(self):
         # If an about:xyz page is visible, no new tab will be opened
         with self.marionette.using_context('content'):
@@ -53,4 +52,4 @@ class TestBrowserWindowShortcuts(FirefoxTestCase):
             """)
             return selection_name == "input"
 
-        self.wait_for_condition(has_input_selected)
+        Wait(self.marionette).until(has_input_selected)

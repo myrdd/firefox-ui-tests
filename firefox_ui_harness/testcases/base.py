@@ -5,15 +5,38 @@
 from marionette import MarionetteTestCase
 
 from firefox_puppeteer import Puppeteer
+from firefox_puppeteer.ui.windows import BrowserWindow
 
 
 class FirefoxTestCase(MarionetteTestCase, Puppeteer):
-    """
-    Test case that inherits from a Puppeteer object so Firefox specific
-    libraries are exposed to test scope.
+    """Base testcase class for Firefox Desktop tests.
+
+    It enhances the Marionette testcase by inserting the Puppeteer mixin class,
+    so Firefox specific API modules are exposed to test scope.
     """
     def __init__(self, *args, **kwargs):
         MarionetteTestCase.__init__(self, *args, **kwargs)
+
+    def restart(self, flags=None):
+        """Restart Firefox and re-initialize data.
+
+        :param flags: Specific restart flags for Firefox
+        """
+        # TODO: Bug 1148220 Marionette's in_app restart has to send 'quit-application-requested'
+        # observer notification before an in_app restart
+        self.marionette.execute_script("""
+          Components.utils.import("resource://gre/modules/Services.jsm");
+          let cancelQuit = Components.classes["@mozilla.org/supports-PRBool;1"]
+                                     .createInstance(Components.interfaces.nsISupportsPRBool);
+          Services.obs.notifyObservers(cancelQuit, "quit-application-requested", null);
+        """)
+        self.marionette.restart(in_app=True)
+
+        # Marionette doesn't keep the former context, so restore to chrome
+        self.marionette.set_context('chrome')
+
+        # Ensure that we always have a valid browser instance available
+        self.browser = self.windows.switch_to(lambda win: type(win) is BrowserWindow)
 
     def setUp(self, *args, **kwargs):
         MarionetteTestCase.setUp(self, *args, **kwargs)
@@ -21,15 +44,22 @@ class FirefoxTestCase(MarionetteTestCase, Puppeteer):
 
         self._start_handle_count = len(self.marionette.window_handles)
         self.marionette.set_context('chrome')
+
         self.browser = self.windows.current
+        self.browser.focus()
+        with self.marionette.using_context(self.marionette.CONTEXT_CONTENT):
+            # Ensure that we have a default page opened
+            self.marionette.navigate(self.prefs.get_pref('browser.newtab.url'))
 
     def tearDown(self, *args, **kwargs):
         self.marionette.set_context('chrome')
+
         try:
             # Marionette needs an existent window to be selected. Take the first
             # browser window which has at least one open tab
             # TODO: We might have to make this more error prone in case the
             # original window has been closed.
+            self.browser.focus()
             self.browser.tabbar.tabs[0].switch_to()
 
             self.prefs.restore_all_prefs()

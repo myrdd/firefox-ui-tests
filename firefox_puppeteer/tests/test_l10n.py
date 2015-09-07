@@ -2,11 +2,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from marionette.errors import MarionetteException
+from marionette_driver import By
+from marionette_driver.errors import MarionetteException
 
 from firefox_puppeteer.api.l10n import L10n
-from firefox_ui_harness.decorators import skip_if_e10s
-from firefox_ui_harness.testcase import FirefoxTestCase
+from firefox_ui_harness import FirefoxTestCase
 
 
 class TestL10n(FirefoxTestCase):
@@ -23,13 +23,11 @@ class TestL10n(FirefoxTestCase):
                 'chrome://browser/locale/baseMenuOverlay.dtd']
 
         value = self.l10n.get_entity(dtds, 'helpSafeMode.label')
-        elm = self.marionette.find_element('id', 'helpSafeMode')
+        elm = self.marionette.find_element(By.ID, 'helpSafeMode')
         self.assertEqual(value, elm.get_attribute('label'))
 
         self.assertRaises(MarionetteException, self.l10n.get_entity, dtds, 'notExistent')
 
-    # Test navigates between remote and non remote pages (bug 1096488)
-    @skip_if_e10s
     def test_dtd_entity_content(self):
         dtds = ['chrome://global/locale/filepicker.dtd',
                 'chrome://global/locale/aboutSupport.dtd']
@@ -39,7 +37,7 @@ class TestL10n(FirefoxTestCase):
         self.marionette.set_context(self.marionette.CONTEXT_CONTENT)
         self.marionette.navigate('about:support')
 
-        elm = self.marionette.find_element('tag name', 'title')
+        elm = self.marionette.find_element(By.TAG_NAME, 'title')
         self.assertEqual(value, elm.text)
 
     def test_properties(self):

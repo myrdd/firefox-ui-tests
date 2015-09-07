@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from . import errors
+from marionette_driver.marionette import HTMLElement
 
 
 class BaseLib(object):
@@ -28,40 +28,42 @@ class BaseLib(object):
 class UIBaseLib(BaseLib):
     """A base class for all UI element wrapper classes inside a chrome window."""
 
-    def __init__(self, marionette_getter, window, dom_element):
-        BaseLib.__init__(self, marionette_getter)
-
+    def __init__(self, marionette_getter, window, element):
         # importing globally doesn't work
         from .ui.windows import BaseWindow
-        if not isinstance(window, BaseWindow):
-            raise errors.UnexpectedWindowTypeError('Not a valid BaseWindow: "%s"' %
-                                                   window)
-        self._window = window
 
-        # TODO: add validity check
-        self._inner_element = dom_element
+        assert isinstance(window, BaseWindow)
+        assert isinstance(element, HTMLElement)
+
+        BaseLib.__init__(self, marionette_getter)
+        self._window = window
+        self._element = element
 
     @property
-    def inner(self):
-        """Returns the inner DOM element.
+    def element(self):
+        """Returns the reference to the underlying DOM element.
 
-        :returns: DOM element
+        :returns: Reference to the DOM element
         """
-        return self._inner_element
+        return self._element
 
     @property
     def window(self):
+        """Returns the reference to the chrome window.
+
+        :returns: :class:`BaseWindow` instance of the chrome window.
+        """
         return self._window
 
     def get_attribute(self, attr):
-        """Retrieves the attribute value of the wrapped inner DOM element.
+        """Retrieves the attribute value of the underlying DOM element.
 
         :param attr: Attribute to retrieve the value from
 
         :returns: The value of the requested attribute
         """
         with self.marionette.using_context('chrome'):
-            retval = self.inner.get_attribute(attr)
+            retval = self.element.get_attribute(attr)
 
         if retval is None:
             raise AttributeError('\'%s\' object has no attribute \'%s\'' %

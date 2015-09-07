@@ -2,17 +2,16 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from time import sleep
-
-from marionette import By, Wait
-from marionette.errors import NoSuchWindowException
-from marionette.keys import Keys
+from marionette_driver import By, Wait
+from marionette_driver.errors import NoSuchWindowException
+from marionette_driver.keys import Keys
 
 import firefox_puppeteer.errors as errors
 
 from ..api.l10n import L10n
 from ..base import BaseLib
 from ..decorators import use_class_as_property
+from ..api.prefs import Preferences
 
 
 class Windows(BaseLib):
@@ -21,7 +20,7 @@ class Windows(BaseLib):
     def all(self):
         """Retrieves a list of all open chrome windows.
 
-        :returns: List of :class:`BaseWindow`'s corresponding to the
+        :returns: List of :class:`BaseWindow` instances corresponding to the
                   windows in `marionette.chrome_window_handles`.
         """
         return [self.create_window_instance(handle) for handle in
@@ -37,23 +36,31 @@ class Windows(BaseLib):
 
     @property
     def focused_chrome_window_handle(self):
-        """Returns the currently focused chrome window handle
+        """Returns the currently focused chrome window handle.
+
+        In case of `None` being returned no window is currently active. This can happen
+        when a new window is opened and the currently focused one gets lowered.
 
         :returns: The `window handle` of the focused chrome window.
         """
         with self.marionette.using_context('chrome'):
             return self.marionette.execute_script("""
-              Cu.import("resource://gre/modules/Services.jsm");
-              var win = Services.wm.getMostRecentWindow("");
-              return win.QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDOMWindowUtils)
-                        .outerWindowID.toString();
+              Components.utils.import("resource://gre/modules/Services.jsm");
+
+              let win = Services.focus.activeWindow;
+              if (win) {
+                return win.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
+                          .getInterface(Components.interfaces.nsIDOMWindowUtils)
+                          .outerWindowID.toString();
+              }
+
+              return null;
             """)
 
     def close(self, handle):
         """Closes the chrome window with the given handle.
 
-        :param handle: The handle of the chrome window
+        :param handle: The handle of the chrome window.
         """
         self.switch_to(handle)
 
@@ -66,7 +73,7 @@ class Windows(BaseLib):
         There is an optional `exceptions` list, which can be used to exclude
         specific chrome windows from being closed.
 
-        :param exceptions: Optional, list of :class:`BaseWindow` instances not to close
+        :param exceptions: Optional, list of :class:`BaseWindow` instances not to close.
         """
         windows_to_keep = exceptions or []
 
@@ -79,26 +86,45 @@ class Windows(BaseLib):
             self.close(handle)
 
     def create_window_instance(self, handle, expected_class=None):
-        """Creates a :class:`BaseWindow` instance for the given chrome window
+        """Creates a :class:`BaseWindow` instance for the given chrome window.
 
-        :param handle: The handle of the chrome window
-        :param expected_class: Optional, check for the correct window class
+        :param handle: The handle of the chrome window.
+        :param expected_class: Optional, check for the correct window class.
         """
         current_handle = self.marionette.current_chrome_window_handle
         window = None
 
         try:
+            # Bug 1169180 - Workaround for handling newly opened chrome windows
+            # Once fixed revert back to make use of self.loaded
+            Wait(self.marionette).until(lambda mn: self.marionette.execute_script("""
+              Components.utils.import("resource://gre/modules/Services.jsm");
+              let win = Services.wm.getOuterWindowWithId(Number(arguments[0]));
+              return win.document.readyState == 'complete';
+            """, script_args=[handle]))
+
             # Retrieve window type to determine the type of chrome window
             if handle != self.marionette.current_chrome_window_handle:
                 self.switch_to(handle)
+
+            Wait(self.marionette).until(lambda mn: mn.get_window_type() is not None)
             window_type = self.marionette.get_window_type()
         finally:
             # Ensure to switch back to the original window
             if handle != current_handle:
                 self.marionette.switch_to_window(current_handle)
 
-        if window_type == 'navigator:browser':
+        if window_type == 'Browser:About':
+            from .about_window.window import AboutWindow
+            window = AboutWindow(lambda: self.marionette, handle)
+        elif window_type == 'navigator:browser':
             window = BrowserWindow(lambda: self.marionette, handle)
+        elif window_type == 'Browser:page-info':
+            from .pageinfo.window import PageInfoWindow
+            window = PageInfoWindow(lambda: self.marionette, handle)
+        elif window_type == 'Update:Wizard':
+            from update_wizard import UpdateWizardDialog
+            window = UpdateWizardDialog(lambda: self.marionette, handle)
         else:
             raise errors.UnknownWindowError('Unknown window type "%s" for handle: "%s"' %
                                             (window_type, handle))
@@ -112,15 +138,14 @@ class Windows(BaseLib):
     def focus(self, handle):
         """Focuses the chrome window with the given handle.
 
-        :param handle: The handle of the chrome window
+        :param handle: The handle of the chrome window.
         """
         self.switch_to(handle)
 
         with self.marionette.using_context('chrome'):
             self.marionette.execute_script(""" window.focus(); """)
 
-        wait = Wait(self.marionette)
-        wait.until(lambda m: handle == self.focused_chrome_window_handle)
+        Wait(self.marionette).until(lambda _: handle == self.focused_chrome_window_handle)
 
     def switch_to(self, target):
         """Switches context to the specified chrome window.
@@ -129,7 +154,7 @@ class Windows(BaseLib):
                        callback that returns True in the context of the desired
                        window.
 
-        :returns: Instance of the selected :class:`BaseWindow`
+        :returns: Instance of the selected :class:`BaseWindow`.
         """
         target_handle = None
 
@@ -171,6 +196,7 @@ class BaseWindow(BaseLib):
     def __init__(self, marionette_getter, window_handle):
         BaseLib.__init__(self, marionette_getter)
         self._l10n = L10n(self.get_marionette)
+        self._prefs = Preferences(self.get_marionette)
         self._windows = Windows(self.get_marionette)
 
         if window_handle not in self.marionette.chrome_window_handles:
@@ -183,7 +209,7 @@ class BaseWindow(BaseLib):
 
     @property
     def closed(self):
-        """Returns closed state of the chrome window
+        """Returns closed state of the chrome window.
 
         :returns: True if the window has been closed.
         """
@@ -191,31 +217,46 @@ class BaseWindow(BaseLib):
 
     @property
     def focused(self):
-        """Returns `True` is the chrome window is focused"""
+        """Returns `True` if the chrome window is focused.
+
+        :returns: True if the window is focused.
+        """
         self.switch_to()
 
         return self.handle == self._windows.focused_chrome_window_handle
 
     @property
     def handle(self):
-        """Returns the `window handle` of the chrome window
+        """Returns the `window handle` of the chrome window.
 
-        :returns: `window handle`
+        :returns: `window handle`.
         """
         return self._handle
 
+    @property
+    def loaded(self):
+        """Checks if the window has been fully loaded.
+
+        :returns: True, if the window is loaded.
+        """
+        self.switch_to()
+
+        return self.marionette.execute_script("""
+          return arguments[0].ownerDocument.readyState === "complete";
+        """, script_args=[self.window_element])
+
     @use_class_as_property('ui.menu.MenuBar')
     def menubar(self):
-        """Provides access to the menu bar. For example the 'File' menu.
+        """Provides access to the menu bar, for example, the **File** menu.
 
         See the :class:`~ui.menu.MenuBar` reference.
         """
 
     @property
-    def window(self):
+    def window_element(self):
         """Returns the inner DOM window element.
 
-        :returns: DOM window element
+        :returns: DOM window element.
         """
         self.switch_to()
 
@@ -224,11 +265,11 @@ class BaseWindow(BaseLib):
     def close(self, callback=None, force=False):
         """Closes the current chrome window.
 
-        If this is the last remaining window, the marionette session is ended.
+        If this is the last remaining window, the Marionette session is ended.
 
         :param callback: Optional, function to trigger the window to open. It is
          triggered with the current :class:`BaseWindow` as parameter.
-         Defaults to `window.open()`
+         Defaults to `window.open()`.
 
         :param force: Optional, forces the closing of the window by using the Gecko API.
          Defaults to `False`.
@@ -238,9 +279,6 @@ class BaseWindow(BaseLib):
         # Bug 1121698
         # For more stable tests register an observer topic first
         prev_win_count = len(self.marionette.chrome_window_handles)
-
-        if self.handle != self.marionette.current_chrome_window_handle:
-            self.switch_to()
 
         if force or callback is None:
             self._windows.close(self.handle)
@@ -252,11 +290,8 @@ class BaseWindow(BaseLib):
         wait = Wait(self.marionette)
         wait.until(lambda m: len(m.chrome_window_handles) == prev_win_count - 1)
 
-        # Ensure we wait long enough until the window has been fully loaded
-        sleep(.5)
-
     def focus(self):
-        """Sets the focus to the current chrome window"""
+        """Sets the focus to the current chrome window."""
         return self._windows.focus(self.handle)
 
     def get_entity(self, entity_id):
@@ -279,16 +314,17 @@ class BaseWindow(BaseLib):
 
         :raises MarionetteException: When property id is not found.
         """
-        return self._l10n.get_entity(self.dtds, property_id)
+        return self._l10n.get_property(self.properties, property_id)
 
-    def open_window(self, callback=None, expected_window_class=None):
-        """Opens a new top-level chrome window
+    def open_window(self, callback=None, expected_window_class=None, expect_focus=True):
+        """Opens a new top-level chrome window.
 
         :param callback: Optional, function to trigger the window to open. It is
          triggered with the current :class:`BaseWindow` as parameter.
-         Defaults to `window.open()`
-
-        :param expected_class: Optional, check for the correct window class
+         Defaults to `window.open()`.
+        :param expected_class: Optional, check for the correct window class.
+        :param expect_focus: Optional, waits until the new window has the expected focus state
+         Defaults to `True`.
         """
         # Bug 1121698
         # For more stable tests register an observer topic first
@@ -306,34 +342,33 @@ class BaseWindow(BaseLib):
             return len(mn.chrome_window_handles) == len(start_handles) + 1
         Wait(self.marionette).until(window_opened)
 
-        # TODO: Temporary ensure to wait long enough until the window has been fully loaded
-        sleep(.5)
-
         handles = self.marionette.chrome_window_handles
         [new_handle] = list(set(handles) - set(start_handles))
 
         assert new_handle is not None
 
         window = self._windows.create_window_instance(new_handle, expected_window_class)
-        window.switch_to()
+
+        Wait(self.marionette).until(lambda _: window.focused == expect_focus)
 
         return window
 
     def send_shortcut(self, command_key, **kwargs):
-        """Sends a keyboard shortcut to the window
+        """Sends a keyboard shortcut to the window.
 
-        :param command_key: The key (usually a letter) to be pressed
+        :param command_key: The key (usually a letter) to be pressed.
 
-        :param accel: Optional, If `True` the `Accel` modifier key is pressed. This key
-         differs between OS X (`Meta`) and Linux/Windows (`Ctrl`). Defaults to `False`
+        :param accel: Optional, If `True`, the `Accel` modifier key is pressed.
+         This key differs between OS X (`Meta`) and Linux/Windows (`Ctrl`). Defaults to `False`.
 
-        :param alt: Optional, If `True` the `Alt` modifier key is pressed. Defaults to `False`
+        :param alt: Optional, If `True`, the `Alt` modifier key is pressed. Defaults to `False`.
 
-        :param ctrl: Optional, If `True` the `Ctrl` modifier key is pressed. Defaults to `False`
+        :param ctrl: Optional, If `True`, the `Ctrl` modifier key is pressed. Defaults to `False`.
 
-        :param meta: Optional, If `True` the `Meta` modifier key is pressed. Defaults to `False`
+        :param meta: Optional, If `True`, the `Meta` modifier key is pressed. Defaults to `False`.
 
-        :param shift: Optional, If `True` the `Shift` modifier key is pressed. Defaults to `False`
+        :param shift: Optional, If `True`, the `Shift` modifier key is pressed.
+         Defaults to `False`.
         """
 
         platform = self.marionette.session_capabilities['platformName'].lower()
@@ -360,17 +395,17 @@ class BaseWindow(BaseLib):
         keys.append(command_key.lower())
 
         self.switch_to()
-        self.window.send_keys(*keys)
+        self.window_element.send_keys(*keys)
 
     def switch_to(self, focus=False):
         """Switches the context to this chrome window.
 
-        By default it will not focus the window. If that behavior is wanted the
+        By default it will not focus the window. If that behavior is wanted, the
         `focus` parameter can be used.
 
-        :param focus: If `True` the chrome window will be focused
+        :param focus: If `True`, the chrome window will be focused.
 
-        :returns: Current window as :class:`BaseWindow` instance
+        :returns: Current window as :class:`BaseWindow` instance.
         """
         if focus:
             self._windows.focus(self.handle)
@@ -389,6 +424,7 @@ class BrowserWindow(BaseWindow):
         'chrome://branding/locale/brand.dtd',
         'chrome://browser/locale/aboutPrivateBrowsing.dtd',
         'chrome://browser/locale/browser.dtd',
+        'chrome://browser/locale/netError.dtd',
     ]
 
     properties = [
@@ -396,16 +432,29 @@ class BrowserWindow(BaseWindow):
         'chrome://branding/locale/browserconfig.properties',
         'chrome://browser/locale/browser.properties',
         'chrome://browser/locale/preferences/preferences.properties',
+        'chrome://global/locale/browser.properties',
     ]
 
     def __init__(self, *args, **kwargs):
         BaseWindow.__init__(self, *args, **kwargs)
 
+        self._navbar = None
         self._tabbar = None
+
+        # Timeout for loading remote web pages
+        self.timeout_page_load = 30
+
+    @property
+    def default_homepage(self):
+        """The default homepage as used by the current locale.
+
+        :returns: The default homepage for the current locale.
+        """
+        return self._prefs.get_pref('browser.startup.homepage', interface='nsIPrefLocalizedString')
 
     @property
     def is_private(self):
-        """Returns True if it is a Private Browsing window."""
+        """Returns True if this is a Private Browsing window."""
         self.switch_to()
 
         with self.marionette.using_context('chrome'):
@@ -414,22 +463,28 @@ class BrowserWindow(BaseWindow):
 
                 let chromeWindow = arguments[0].ownerDocument.defaultView;
                 return PrivateBrowsingUtils.isWindowPrivate(chromeWindow);
-            """, script_args=[self.window])
+            """, script_args=[self.window_element])
 
-    @use_class_as_property('ui.toolbars.NavBar')
+    @property
     def navbar(self):
-        """
-        Provides access to the navigation bar. This is the toolbar containing
+        """Provides access to the navigation bar. This is the toolbar containing
         the back, forward and home buttons. It also contains the location bar.
 
-        See the :class:`~ui.navbar.NavBar` reference.
+        See the :class:`~ui.toolbars.NavBar` reference.
         """
+        self.switch_to()
+
+        if not self._navbar:
+            from .toolbars import NavBar
+
+            navbar = self.window_element.find_element(By.ID, 'nav-bar')
+            self._navbar = NavBar(lambda: self.marionette, self, navbar)
+
+        return self._navbar
 
     @property
     def tabbar(self):
-        """
-        Provides access to the tab bar. This is the toolbar containing all the
-        tabs, the new tab button, and the tab menu
+        """Provides access to the tab bar.
 
         See the :class:`~ui.tabbar.TabBar` reference.
         """
@@ -437,15 +492,16 @@ class BrowserWindow(BaseWindow):
 
         if not self._tabbar:
             from .tabbar import TabBar
-            tabbar = self.window.find_element('id', 'tabbrowser-tabs')
-            self._tabbar = TabBar(lambda: self.marionette, self, tabbar)
+
+            tabbrowser = self.window_element.find_element(By.ID, 'tabbrowser-tabs')
+            self._tabbar = TabBar(lambda: self.marionette, self, tabbrowser)
 
         return self._tabbar
 
     def close(self, trigger='menu', force=False):
         """Closes the current browser window by using the specified trigger.
 
-        :param trigger: Optional, method in how to close the current browser window. This can
+        :param trigger: Optional, method to close the current browser window. This can
          be a string with one of `menu` or `shortcut`, or a callback which gets triggered
          with the current :class:`BrowserWindow` as parameter. Defaults to `menu`.
 
@@ -458,14 +514,27 @@ class BrowserWindow(BaseWindow):
                 trigger(win)
             elif trigger == 'menu':
                 # TODO: Make use of menubar class once it supports ids
-                menu = win.marionette.find_element('id', 'menu_closeWindow')
+                menu = win.marionette.find_element(By.ID, 'menu_closeWindow')
                 menu.click()
             elif trigger == 'shortcut':
-                win.send_shortcut(win.get_entity('closeCmd.key'), accel=True, shift=True)
+                win.send_shortcut(win.get_entity('closeCmd.key'),
+                                  accel=True, shift=True)
             else:
                 raise ValueError('Unknown closing method: "%s"' % trigger)
 
         BaseWindow.close(self, callback, force)
+
+    def get_final_url(self, url):
+        """Loads the page at `url` and returns the resulting url.
+
+        This function enables testing redirects.
+
+        :param url: The url to test.
+        :returns: The resulting loaded url.
+        """
+        with self.marionette.using_context('content'):
+            self.marionette.navigate(url)
+            return self.marionette.get_url()
 
     def open_browser(self, trigger='menu', is_private=False):
         """Opens a new browser window by using the specified trigger.
@@ -476,7 +545,7 @@ class BrowserWindow(BaseWindow):
 
         :param is_private: Optional, if True the new window will be a private browsing one.
 
-        :returns: :class:`BrowserWindow` instance for the new browser window
+        :returns: :class:`BrowserWindow` instance for the new browser window.
         """
         def callback(win):
             # Prepare action which triggers the opening of the browser window
@@ -485,12 +554,68 @@ class BrowserWindow(BaseWindow):
             elif trigger == 'menu':
                 # TODO: Make use of menubar class once it supports ids
                 menu_id = 'menu_newPrivateWindow' if is_private else 'menu_newNavigator'
-                menu = win.marionette.find_element('id', menu_id)
+                menu = win.marionette.find_element(By.ID, menu_id)
                 menu.click()
             elif trigger == 'shortcut':
                 cmd_key = 'privateBrowsingCmd.commandkey' if is_private else 'newNavigatorCmd.key'
-                win.send_shortcut(win.get_entity(cmd_key), accel=True, shift=is_private)
+                win.send_shortcut(win.get_entity(cmd_key),
+                                  accel=True, shift=is_private)
             else:
                 raise ValueError('Unknown opening method: "%s"' % trigger)
 
         return BaseWindow.open_window(self, callback, BrowserWindow)
+
+    def open_about_window(self, trigger='menu'):
+        """Opens the about window by using the specified trigger.
+
+        :param trigger: Optional, method in how to open the new browser window. This can
+         either the string `menu` or a callback which gets triggered
+         with the current :class:`BrowserWindow` as parameter. Defaults to `menu`.
+
+        :returns: :class:`AboutWindow` instance of the opened window.
+        """
+        def callback(win):
+            # Prepare action which triggers the opening of the browser window
+            if callable(trigger):
+                trigger(win)
+            elif trigger == 'menu':
+                # TODO: Make use of menubar class once it supports ids
+                menu = win.marionette.find_element(By.ID, 'aboutName')
+                menu.click()
+            else:
+                raise ValueError('Unknown opening method: "%s"' % trigger)
+
+        from .about_window.window import AboutWindow
+        return BaseWindow.open_window(self, callback, AboutWindow)
+
+    def open_page_info_window(self, trigger='menu'):
+        """Opens the page info window by using the specified trigger.
+
+        :param trigger: Optional, method in how to open the new browser window. This can
+         be a string with one of `menu` or `shortcut`, or a callback which gets triggered
+         with the current :class:`BrowserWindow` as parameter. Defaults to `menu`.
+
+        :returns: :class:`PageInfoWindow` instance of the opened window.
+        """
+        from .pageinfo.window import PageInfoWindow
+
+        def callback(win):
+            # Prepare action which triggers the opening of the browser window
+            if callable(trigger):
+                trigger(win)
+            elif trigger == 'menu':
+                # TODO: Make use of menubar class once it supports ids
+                menu = win.marionette.find_element(By.ID, 'menu_pageInfo')
+                menu.click()
+            elif trigger == 'shortcut':
+                if win.marionette.session_capabilities['platform'] == 'WINNT':
+                    raise ValueError('Page info shortcut not available on Windows.')
+                win.send_shortcut(win.get_entity('pageInfoCmd.commandkey'),
+                                  accel=True)
+            elif trigger == 'context_menu':
+                # TODO: Add once we can do right clicks
+                pass
+            else:
+                raise ValueError('Unknown opening method: "%s"' % trigger)
+
+        return BaseWindow.open_window(self, callback, PageInfoWindow)
